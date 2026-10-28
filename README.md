@@ -17,12 +17,28 @@ A free, open-source change detection tool built on Google Earth Engine, using NA
 
 ---
 
+## What's new in v3.4
+
+v3.4 is a reliability and plain-language release. The full list is in [CHANGELOG.md](CHANGELOG.md).
+
+- **Missing data is no longer read as darkness.** Months the satellite could not see clearly are left out, and each spot is compared only on calendar months seen clearly in both periods (September with September), so seasons can't fake a change.
+- **A truer headline figure.** The change is now in total light across the same lit spots in both periods, not an average of pixel percentages. The old average was pulled towards zero by dark desert and sea pixels and could understate a large fall several times over.
+- **Works far from the equator.** Areas centred at 30° latitude or more switch automatically to the stray-light corrected version of the same NOAA/EOG data, which keeps the summer months. Before, those missing summer months were counted as darkness.
+- **A plain-language summary.** Every result opens with what it means in everyday words, plus cautions when coverage is thin, when part of the area brightened and part dimmed, when lights are mostly at sea, or when a big rise could be fires or gas flares. A "What does this mean?" guide explains every colour.
+- **Honest failures.** Errors, timeouts and missing data now say so instead of showing "complete" or "0 change areas". Areas with too few lit spots give no headline figure at all.
+- **Accurate change areas.** Stats and areas come from each area's own pixels and their true size on the ground. Rises and falls are kept separate.
+- **Choose your area and dates.** Map view, country or province boundaries, a drawn shape or pasted GeoJSON. Dates are shown everywhere, and a custom earlier period ends at the month you choose.
+- **Downloads and links.** Change areas download as GeoJSON (points and outlines), CSV and KML, with dates and settings written into every record. A link reproduces the exact analysis.
+- **Tested.** 26 built-in self-tests, plus testing on real data across conflict, disaster, cloudy tropical, high-latitude, coastal and open-sea areas.
+
+---
+
 ## Quickstart
 
 1. Open the [tool](https://gee-night-lights-474517.projects.earthengine.app/view/darklight-viewer)
 2. Select a preset location or navigate the map to your area of interest
 3. Choose a comparison period (1 year ago is recommended for most use cases)
-4. Click **ANALYZE THIS AREA**
+4. Click **ANALYSE** and read the plain-language summary under it. **What does this mean?** explains the colours
 5. Click anywhere on the result map to generate a time-series chart for that location
 
 ---
@@ -57,27 +73,30 @@ Click anywhere on the map and the tool generates a monthly time-series chart for
 - **Resolution:** ~500 metres per pixel
 - **Coverage:** Global, April 2012 to present
 - **Source:** NOAA / Earth Observation Group — hosted on Google Earth Engine
-- **GEE dataset ID:** `NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG`
+- **GEE dataset IDs:** `NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG` (standard, from April 2012) and `NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG` (stray-light corrected, from January 2014; used automatically at 30° latitude or more)
 
 ---
 
 ## How the analysis works
 
-1. The tool retrieves the most recent available VIIRS monthly composite
-2. It computes a rolling mean radiance for the current period and a baseline period
-3. Percentage change is calculated as `((current - baseline) / baseline) * 100`; baseline radiance is floored at 0.5 nW/cm²/sr to avoid division by zero in very dark areas
-4. Change areas are classified by severity and clustered using connected components analysis (minimum cluster size: 5 pixels, approximately 1.25 km²)
-5. Centroids are generated for each cluster and enriched with mean change, area, and severity attributes
+1. The tool reads the latest available VIIRS monthly composite and builds two periods of equal length: an earlier period and a later one. Story locations end the earlier period the month before the event
+2. Months with no cloud-free observation (`cf_cvg` = 0) are removed, so missing data never counts as darkness
+3. Each later month is paired with the same calendar month in the earlier period. A spot is compared only on months seen clearly in both, and needs at least 75% of them by default (9 of 12; short windows round up, so 3 of 3)
+4. The headline is the change in total light across the same lit spots in both periods. A spot is lit if it is above 1 nW/cm²/sr in either period. No headline is given with fewer than 25 compared spots
+5. Per-spot percentage change uses the earlier value floored at 0.5 nW/cm²/sr, to avoid dividing by near-zero values in very dark places
+6. Change areas group neighbouring spots that changed by at least 30% and 1 nW/cm²/sr (minimum 5 spots). Rises and falls are kept apart, and each area's statistics and size come from its own pixels on the native grid
 
 **Time period options:**
 
-| Selection | Rolling window | Offset |
+| Selection | Each period | Earlier period ends |
 |---|---|---|
-| 1 month ago | 3-month mean | 1 month |
-| 1 year ago | 12-month mean | 12 months |
-| 5 years ago | 12-month mean | 60 months |
-| 10 years ago | 12-month mean | 120 months |
-| Custom date | 12-month mean | User-defined |
+| Last 12 months vs the 12 before (default) | 12 months | 12 months before the later period |
+| Latest month vs the month before | 1 month | 1 month before |
+| Last 3 months vs same 3 months a year earlier | 3 months | 12 months before |
+| Last 3 months vs the 3 before | 3 months | 3 months before |
+| Last 12 months vs 12 months, 5 years earlier | 12 months | 60 months before |
+| Last 12 months vs 12 months, 10 years earlier | 12 months | 120 months before |
+| Choose my own dates | 1, 3, 6 or 12 months | The month you choose (overlapping periods refused unless allowed) |
 
 ---
 
@@ -152,13 +171,12 @@ The following cases illustrate both the analytical value and the interpretive li
 
 ## Export
 
-Detected change nodes can be exported as GeoJSON directly from the tool interface. The export includes:
+Detected change areas can be downloaded from the tool as centre points (GeoJSON, CSV, KML), outlines (GeoJSON) and the analysed area (GeoJSON). In the Code Editor they can also be exported to Google Drive. Each record includes:
 
-- `mean_change_pct` — mean percentage change within a 2 km buffer of the node centroid
-- `pixel_count` — number of pixels in the cluster
-- `area_km2` — approximate area of the cluster
-- `severity` — classified as `severe`, `high`, `moderate`, `growth`, or `low`
-- `cluster_id` — unique identifier for the cluster
+- `direction` and `change_band` (for example `decrease >70%`), describing the size of the change, not its cause
+- `mean_change_pct`, `pixel_count`, `area_km2` and the radiance sums for both periods, all from the area's own pixels
+- `centroid_lon`, `centroid_lat` and `cluster_id`
+- the dates, dataset, thresholds and quality settings used, so every file can be traced back to the run that made it
 
 Note: export links are time-limited signed URLs generated by Google Earth Engine. They expire within a few hours of generation and do not expose any authentication credentials.
 
@@ -174,9 +192,9 @@ The tool runs entirely within Google Earth Engine's free research tier. There is
 
 If you use this tool in published work, please cite:
 
-**Tool:** Strick, B. (2026). *Dark Light Viewer v3.1*. Available at: https://gee-night-lights-474517.projects.earthengine.app/view/darklight-viewer
+**Tool:** Strick, B. (2026). *Dark Light Viewer v3.4*. Available at: https://gee-night-lights-474517.projects.earthengine.app/view/darklight-viewer
 
-**Underlying data:** NOAA/EOG. *VIIRS Day/Night Band Monthly Composites (VCMCFG)*. Distributed via Google Earth Engine.
+**Underlying data:** NOAA/EOG. *VIIRS Day/Night Band Monthly Composites (VCMCFG; stray-light corrected VCMSLCFG)*. Distributed via Google Earth Engine.
 
 ---
 
